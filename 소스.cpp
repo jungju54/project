@@ -14,24 +14,19 @@
 
 #define WIDTHBYTES(bits) (((bits)+31)/32*4)
 #define BYTE    unsigned char
-#define NUM_INPUT	2
-#define NUM_HIDDEN	2
-#define NUM_OUTPUT	1
-#define NUM_TRAINING_DATA	4
-#define NUM_TEST_DATA	4
-#define MAX_EPOCH	100000
+#define NUM_INPUT	64*64
+#define NUM_HIDDEN	3
+#define NUM_OUTPUT	64*64
+#define NUM_TRAINING_DATA	3
+#define NUM_TEST_DATA	64*64
+#define MAX_EPOCH	10
 #define LEARNING_RATE	0.5
 #define SIGMOID(x) (1./(1+exp(-(x))))
 
 
-double training_point[NUM_TRAINING_DATA][NUM_INPUT]
-= { { 1.0,1.0 },{ 1.0,0.0 },{ 0.0,1.0 },{ 0.0,0.0 } };
-
-double training_target[NUM_TRAINING_DATA][NUM_OUTPUT]
-= { { 0.0 },{ 1.0 },{ 1.0 },{ 0.0 } };
-
-double test_point[NUM_TEST_DATA][NUM_INPUT]
-= { { 0,0 },{ 0,1 },{ 1,0 },{ 1,1 } };
+//double training_point[NUM_TRAINING_DATA][NUM_INPUT];
+//double training_target[NUM_TRAINING_DATA][NUM_OUTPUT];
+//double test_point[NUM_TEST_DATA][NUM_INPUT];
 
 int InitWeight(double weight_kj[NUM_OUTPUT][NUM_HIDDEN], double weight_ji[NUM_HIDDEN][NUM_INPUT],
 	double bias_k[NUM_OUTPUT], double bias_j[NUM_HIDDEN])
@@ -205,9 +200,8 @@ int PrintWeight(double weight_kj[NUM_OUTPUT][NUM_HIDDEN], double weight_ji[NUM_H
 int main(void) {
 
 	FILE *source, *result;
-	int data,prev,now,height,width;
-	int line = 0, num = 0;
 
+	//신경망 변수들
 	double hidden[NUM_HIDDEN], output[NUM_OUTPUT];
 	double weight_kj[NUM_OUTPUT][NUM_HIDDEN], weight_ji[NUM_HIDDEN][NUM_INPUT];
 	double bias_k[NUM_OUTPUT], bias_j[NUM_HIDDEN];
@@ -217,7 +211,7 @@ int main(void) {
 
 	int i, k, p;
 	
-
+	//이미지 축소 후 보간법으로 확대.
 	IplImage *src_image = cvLoadImage("source.bmp", CV_LOAD_IMAGE_COLOR);
 	CvSize SrcSize, BeforeSize, AfterSize;
 	SrcSize.height = src_image->height; SrcSize.width = src_image->width;
@@ -235,15 +229,54 @@ int main(void) {
 	cvShowImage("bilinear interpolation - 2", bili_changed);
 	cvShowImage("source", src_image);
 	
+	double **training_point = (double **)malloc(sizeof(double*) * 3);
+	for (int i = 0; i < 3; i++)
+		training_point[i] = (double*)malloc(sizeof(double)*src_image->width*src_image->height);
+	double **training_target = (double **)malloc(sizeof(double*) * 3);
+	for (int i = 0; i < 3; i++)
+		training_target[i] = (double*)malloc(sizeof(double)*src_image->width*src_image->height);
 	
-
+	//신경망 초기화
 	InitWeight(weight_kj, weight_ji, bias_k, bias_j);
+	srand((unsigned)time(NULL));
+
+	//기본파일, 최종파일 포인터.
 	fopen_s(&source, "source.bmp", "rb");
 	fopen_s(&result, "result.bmp", "wb");
-	srand((unsigned)time(NULL));
 	
 	
-	/* 신경망
+	
+
+	
+	//bmp 파일 읽어오기
+	BITMAPFILEHEADER header;
+	BITMAPINFOHEADER info;
+	fread(&header, sizeof(BITMAPFILEHEADER), 1, source);
+	if (header.bfType != 0x4D42) exit(1);
+	fread(&info, sizeof(BITMAPINFOHEADER), 1, source);
+	BYTE *lpImg = new BYTE[info.biSizeImage];
+	BYTE *bigImg = new BYTE[info.biSizeImage * 4];
+	fread(lpImg, sizeof(char), info.biSizeImage, source);
+	fclose(source);
+
+	//int rwsize = WIDTHBYTES(hInfo.biBitCount * hInfo.biWidth);
+	//기본이미지를 training target으로 설정.
+	for(int i=0;i< info.biHeight;i++)
+		for (int j = 0; j < info.biWidth; j++) {
+			training_target[0][i * info.biWidth + j] = (double)lpImg[i * 3 * info.biWidth + j * 3];
+			training_target[1][i * info.biWidth + j] = (double)lpImg[i * 3 * info.biWidth + j * 3 + 1];
+			training_target[2][i * info.biWidth + j] = (double)lpImg[i * 3 * info.biWidth + j * 3 + 2];
+		}
+
+	//축소,확대가 진행된 이미지를 training point로 설정.
+	for (int i = 0; i < info.biHeight; i++)
+		for (int j = 0; j < info.biWidth; j++) {
+			training_point[0][i*info.biWidth + j] = (double)bili_changed->imageData[(info.biHeight - 1 - i) * 3 * info.biWidth + j * 3];
+			training_point[1][i*info.biWidth + j] = (double)bili_changed->imageData[(info.biHeight - 1 - i) * 3 * info.biWidth + j * 3 + 1];
+			training_point[2][i*info.biWidth + j] = (double)bili_changed->imageData[(info.biHeight - 1 - i) * 3 * info.biWidth + j * 3 + 2];
+		}
+	/*
+	//학습 진행. 신경망.
 	for (int epoch = 0; epoch <= MAX_EPOCH; epoch++)
 	{
 		error = 0;
@@ -265,69 +298,66 @@ int main(void) {
 		UpdateWeights(delta_kj, delta_ji, delta_bias_k, delta_bias_j,
 			weight_kj, weight_ji, bias_k, bias_j);
 
-		if (epoch % 1000 == 0) printf("%d: %f\n", epoch, error);
+		if (epoch % 1== 0) printf("%d: %f\n", epoch, error);
 	}
+	for (int i = 0; i < 3; i++) {
+		free(training_point[i]); free(training_target[i]);
+	}
+	free(training_point); free(training_target);
 	*/
-	
-	BITMAPFILEHEADER hf;
-	BITMAPINFOHEADER hInfo;
-	//RGBQUAD hRGB[256];
-	
 
-	fread(&hf, sizeof(BITMAPFILEHEADER), 1, source);
-	if (hf.bfType != 0x4D42) exit(1);
-	fread(&hInfo, sizeof(BITMAPINFOHEADER), 1, source);
-	//fread(hRGB, sizeof(RGBQUAD), 256, source);
-	BYTE *lpImg = new BYTE[hInfo.biSizeImage];
-	fread(lpImg, sizeof(char), hInfo.biSizeImage, source);
-	fclose(source);
-	BYTE *blue = new BYTE[hInfo.biSizeImage / 3];
-	BYTE *green = new BYTE[hInfo.biSizeImage / 3];
-	BYTE *red = new BYTE[hInfo.biSizeImage / 3];
+	//확대
+	IplImage *bili_big = cvCreateImage(AfterSize, src_image->depth, src_image->nChannels);
+	cvResize(src_image, bili_big, CV_INTER_LINEAR);
 	
-	//int rwsize = WIDTHBYTES(hInfo.biBitCount * hInfo.biWidth);
-	int dia=1, tap;
-	for (int i = 0; i<hInfo.biHeight; i++) {
-		for (int j = 0; j < hInfo.biWidth / 2; j++) {
-			for (int k = 0; k < 3; k++) {
-				lpImg[i * 3 * hInfo.biWidth + 3 * (j * 2 + dia) + k] = 255;
+	printf("%lf %lf\n", (double)bili_big->imageData[12289], (double)bili_big->height);
+	double **test_point = (double **)malloc(sizeof(double*) * 3);
+	for (int i = 0; i < 3; i++)
+		test_point[i] = (double*)malloc(sizeof(double)*src_image->width*src_image->height);
+
+	/*
+	//테스트
+	int index = 0;
+	for (int m = 0; m < 4; m++) {
+		for (int n = 0; n < info.biWidth*info.biHeight; n++) {//m*info.biWidth*info.biHeight+3*n
+			test_point[0][n] = (double)bili_big->imageData[m*info.biWidth*info.biHeight + 3 * n];
+			test_point[1][n] = (double)bili_big->imageData[m*info.biWidth*info.biHeight + 3 * n+1];
+			test_point[2][n] = (double)bili_big->imageData[m*info.biWidth*info.biHeight + 3 * n+2];
+		}
+		for (i = 0; i < NUM_TEST_DATA; i++)
+		{
+			//Forward(test_point[i], weight_kj, weight_ji, bias_k, bias_j,hidden, output);
+
+			for (k = 0; k < info.biWidth*info.biHeight; k++)
+			{
+				bigImg[info.biWidth*info.biHeight * (3 - m) * 3 + 3 * k + i] = output[k];
 			}
 		}
-		dia = 1 - dia;
 	}
+	for (int i = 0; i < 3; i++) {
+		free(test_point[i]); 
+	}
+	free(test_point); 
+	*/
 
-	for(int i=0;i<hInfo.biHeight;i++)
-		for (int j = 0; j < hInfo.biWidth; j++) {
-			blue[i * hInfo.biWidth + j] = lpImg[i * 3 * hInfo.biWidth + j * 3]; 
-			green[i * hInfo.biWidth + j] = lpImg[i * 3 * hInfo.biWidth + j * 3 + 1]; 
-			red[i * hInfo.biWidth + j] = lpImg[i * 3 * hInfo.biWidth + j * 3 + 2];
-		}
-	//bilinear_interpolation(blue, hInfo.biWidth, hInfo.biHeight);
-	//bilinear_interpolation(green, hInfo.biWidth, hInfo.biHeight);
-	//bilinear_interpolation(red, hInfo.biWidth, hInfo.biHeight);
-
-	for(int i=0;i<hInfo.biHeight;i++)
-		for (int j = 0; j < hInfo.biWidth; j++) {
-			lpImg[i * 3 * hInfo.biWidth + j * 3] = blue[i * hInfo.biWidth + j];
-			lpImg[i * 3 * hInfo.biWidth + j * 3 + 1] = green[i * hInfo.biWidth + j];
-			lpImg[i * 3 * hInfo.biWidth + j * 3 + 2] = red[i * hInfo.biWidth + j];
-		}
-
-	for (int i = 0; i < hInfo.biHeight; i++)
-		for (int j = 0; j < hInfo.biWidth * 3; j++) {
-			lpImg[i * 3 * hInfo.biWidth + j] = src_image->imageData[(hInfo.biHeight-1-i) * 3 * hInfo.biWidth + j];
-		}
-
-	fwrite(&hf, sizeof(char), sizeof(BITMAPFILEHEADER), result);
-	fwrite(&hInfo, sizeof(char), sizeof(BITMAPINFOHEADER), result);
-	//fwrite(hRGB, sizeof(RGBQUAD), 256, result);
-	fwrite(lpImg, sizeof(char), hInfo.biSizeImage, result);
+	cvShowImage("확대", bili_big);
+	//최종이미지 생성.
+	header.bfSize += NUM_OUTPUT * 3;
+	info.biHeight = 2 * info.biHeight; info.biWidth = 2 * info.biWidth;
+	info.biSizeImage += NUM_OUTPUT * 3;
+	fwrite(&header, sizeof(char), sizeof(BITMAPFILEHEADER), result);
+	fwrite(&info, sizeof(char), sizeof(BITMAPINFOHEADER), result);
+	fwrite(bigImg, sizeof(char), info.biSizeImage, result);
 	
+
+	//종료.
 	fclose(result);
 	cvReleaseImage(&src_image);
 	cvReleaseImage(&near_small); cvReleaseImage(&bili_small);
 	cvReleaseImage(&near_changed); cvReleaseImage(&bili_changed);
+	cvReleaseImage(&bili_big);
 	delete[] lpImg;
+	delete[] bigImg;
 
 	cvWaitKey(0);
 	return 0;
